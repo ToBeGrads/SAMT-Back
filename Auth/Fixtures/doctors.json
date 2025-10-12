@@ -1,0 +1,20 @@
+[
+  {
+    "model": "Auth.user",
+    "pk": 1,
+    "fields": {
+      "email": "tliba.souh@gmail.com",
+      "password": "tliba.souh"
+    }
+  },
+  {
+    "model": "Auth.user",
+    "pk": 2,
+    "fields": {
+      "email": "user@example.com",
+      "password": "user123"
+    }
+  }
+]
+
+

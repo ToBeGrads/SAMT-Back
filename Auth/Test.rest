@@ -1,0 +1,30 @@
+# POST http://127.0.0.1:8000/Login/
+# Content-Type: application/json
+
+# {
+# "email" : "sarah@happy.com", 
+# "password" : "Whatdoyoumean"
+# }
+
+
+POST http://127.0.0.1:8000/SignUp/
+Content-Type: application/json
+
+{
+"email" : "sarah@happy.com", 
+"password" : "Whatdoyoumean"
+}
+
+
+# GET http://127.0.0.1:8000/segment/MRI_List_For_Segment
+# Content-Type: application/json
+
+# {
+# "doc_id" : "4"
+# }
+
+# POST http://127.0.0.1:8000/newCoords/
+# Content-Type: application/json
+
+# {
+# }

@@ -6,13 +6,13 @@ class Structures(models.Model) :
     structure_id = models.AutoField(max_length=255,primary_key=True)
     structure_name = models.CharField(max_length=255)
     
-
-
 class Patients(models.Model):
     patient_id = models.CharField(max_length=20,primary_key=True)
     gender = models.CharField(max_length=20, choices=[('Female','F'),("Male",'M')])
     birth_year = models.IntegerField(null=True, blank=True)
-    mri = models.ImageField(upload_to='MRIs/')
+    mri = models.FileField(upload_to='MRIs/')
+    dims = models.JSONField(default = list, null=True, blank=True)
+    modality = models.CharField(max_length=255, null=True)
     status = models.CharField(max_length=20, choices=[('Finished','F'),("Unfinished",'U')])
 
     @property
@@ -22,7 +22,6 @@ class Patients(models.Model):
     
     def __str__(self):
         return self.patient_id
-
 class MRI_Masks(models.Model):
     mask_id = models.AutoField(primary_key = True)
     structure = models.ForeignKey(Structures, on_delete = models.CASCADE, null = True, blank = True)
@@ -31,7 +30,8 @@ class MRI_Masks(models.Model):
     patient = models.ForeignKey(Patients, on_delete = models.CASCADE)
     doctor = models.ForeignKey(Doctors, on_delete = models.CASCADE, null = True, blank = True)
     rater = models.IntegerField(null = True, blank = True)
-    mask_path = models.ImageField(upload_to = 'Masks/', null = True, blank = True)  # saved mask image or overlay
+    mask_path = models.FileField(upload_to = 'Masks/', null = True, blank = True)  # saved mask image or overlay
+    dims = models.JSONField(default = list, null=True, blank=True)
     
 
 class MRI_MASK_Meta_Data(models.Model): 

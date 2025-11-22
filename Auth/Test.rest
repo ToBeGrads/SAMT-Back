@@ -1,19 +1,18 @@
-# POST http://127.0.0.1:8000/Login/
+POST http://127.0.0.1:8000/Login/
+Content-Type: application/json
+
+{
+"email" : "doctor@gmail.com", 
+"password" : "doctor"}
+
+
+# POST http://127.0.0.1:8000/SignUp/
 # Content-Type: application/json
 
 # {
 # "email" : "sarah@happy.com", 
 # "password" : "Whatdoyoumean"
 # }
-
-
-POST http://127.0.0.1:8000/SignUp/
-Content-Type: application/json
-
-{
-"email" : "sarah@happy.com", 
-"password" : "Whatdoyoumean"
-}
 
 
 # GET http://127.0.0.1:8000/segment/MRI_List_For_Segment
@@ -23,8 +22,8 @@ Content-Type: application/json
 # "doc_id" : "4"
 # }
 
-# POST http://127.0.0.1:8000/newCoords/
+# GET https://stackless-gablewindowed-yanira.ngrok-free.dev/segment/MRI_List_For_Segment
 # Content-Type: application/json
+# Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJzYXJhaEBoYXBweS5jb20iLCJleHAiOjE3NjMxMzAyOTAsImlhdCI6MTc2Mjc3MDI5MH0.x5kNicjd3un5F-qrYmwaylxaxgs175qLf88BE3_EztE
 
-# {
-# }
+# {}

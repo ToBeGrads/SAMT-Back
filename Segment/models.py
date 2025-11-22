@@ -7,7 +7,8 @@ class Structures(models.Model) :
     structure_name = models.CharField(max_length=255)
     
 class Patients(models.Model):
-    patient_id = models.CharField(max_length=20,primary_key=True)
+    id = models.AutoField(primary_key = True)
+    patient_id = models.CharField(max_length=20)
     gender = models.CharField(max_length=20, choices=[('Female','F'),("Male",'M')])
     birth_year = models.IntegerField(null=True, blank=True)
     mri = models.FileField(upload_to='MRIs/')

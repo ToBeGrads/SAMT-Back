@@ -35,11 +35,12 @@ class Command(BaseCommand):
                     )
 
                 Patients.objects.update_or_create(
-                    patient_id=row['Patient ID'],
-                    defaults={
-                        'gender': row.get('Sex', 'Unknown'),
-                        'birth_year': birth_year,
-                    }
-                )
+                patient_id=row['Patient ID'],   
+                modality=row['modality'],       
+                defaults={
+                    'gender': row.get('Sex', 'Unknown'),
+                    'birth_year': birth_year,
+                }
+            )
 
         self.stdout.write(self.style.SUCCESS('Patients imported successfully with birth years!'))

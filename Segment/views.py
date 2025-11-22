@@ -2,27 +2,20 @@ import base64
 from io import BytesIO
 import json
 import os
-from django.shortcuts import render
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
 from PIL import Image
-import csv
-from django.http import JsonResponse
 from django.views.decorators.http import require_GET
 import torch
 from transformers import SamModel, SamProcessor
 import numpy as np
 from .models import Patients, MRI_Masks, Structures
-from .serializers import MRIMASKSSerializer
 from Auth.models import Doctors
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
-from django.core.files import File
-import nibabel as nib
+import time
 import numpy as np
-import os
-from django.http import FileResponse
 
 #===================================
 #       GET ALL THE STRUCTURES
@@ -140,21 +133,25 @@ def AddStructure(request) :
                   # if there is not structure created i.e. the structure is null for the doctor - patient pair
                   # this case is possible because the model for patient-doctors is not independent of Masks model
                   null_mask = masks.filter(structure__isnull=True).first()
+                  print(null_mask)
                   if null_mask : 
-                        MRI_Masks.objects.get_or_create(doctor = doc, patient = patient, structure = structu, structure_color = structure["color"], coordinates = structure["coordinates"])  
+                        null_mask.structure = structu
+                        null_mask.structure_color = structure["color"]
+                        null_mask.coordinates = structure["coordinates"]
+                        null_mask.save()
                         return Response({
                               "message": "structure saved with success !"
                               }, status = status.HTTP_200_OK)    
                   else : 
                         # check if the structure already exists :
-                        mask = MRI_Masks.objects.get(doctor = doc, patient = patient, structure = structu, structure_color = structure['color'])
+                        mask = MRI_Masks.objects.get(doctor = doc, patient = patient, structure = structu)
                         return Response({
                                     "message": "it Already exists!"
                                     }, status = status.HTTP_400_BAD_REQUEST)
             else : 
                   return Response({
                         "message" : "Either the Patient is not assigned to this Docto, or the Structure does not exist!"
-                        }, status = status.HTTP_200_OK)
+                        }, status = status.HTTP_400_BAD_REQUEST)
       except MRI_Masks.DoesNotExist :
             MRI_Masks.objects.get_or_create(doctor = doc, patient = patient, structure = structu, structure_color = structure["color"], coordinates = structure["coordinates"])     
             return Response({
@@ -220,16 +217,19 @@ def MRI_List_For_Segment(request):
                         data = []
                         for p in mris:
                               pid = p.patient.patient_id
-                              if pid not in seen:
-                                    seen.add(pid)
-                                    data.append({
+                              m = p.patient.modality
+                              tup = (pid,m)
+                              # if tup not in seen:
+                              #       seen.add(tup)
+                              data.append({
                                           "patient_id": pid,
                                           "sex": p.patient.gender,
                                           "age": str(p.patient.age),
                                           "status": p.patient.status,
-                                          "mri_path": p.patient.mri.url
+                                          "mri_path": p.patient.mri.url,
+                                          "modality" : p.patient.modality
                                     })
-
+                        print(data)
                         return Response({
                               "message" : "fetching mris with success", 
                               "mris" : data
@@ -255,6 +255,7 @@ def Add_Coordinates(request):
       coordinates = request.data.get("coordinates")
       patient_id = request.data.get("patient_id")
       structure_id = request.data.get("structure_id")
+      modality = request.data.get("modality")
       doc_id = request.doc_id
 
       if not coordinates or not patient_id or not structure_id : 
@@ -265,7 +266,7 @@ def Add_Coordinates(request):
       try:
             doc = Doctors.objects.get(id = doc_id) 
             structure = Structures.objects.get(structure_id = structure_id) 
-            patient = Patients.objects.get(patient_id = patient_id)
+            patient = Patients.objects.get(patient_id = patient_id, modality = modality)
             mask = MRI_Masks.objects.get(patient = patient, structure = structure, doctor = doc)
             # add the new coordinates 
             coords = {
@@ -410,11 +411,12 @@ def Has_segmentation(request) :
 def Load_mask(request) :
       patient_id = request.data.get("patient_id")
       structure_id = request.data.get("structure_id")
+      modality = request.data.get('modality')
       doc_id = request.doc_id
       
       try : 
             # load the mask 
-            patient = Patients.objects.get(patient_id = patient_id)
+            patient = Patients.objects.get(patient_id = patient_id, modality = modality)
             structure = Structures.objects.get(structure_id = structure_id)
             doc = Doctors.objects.get(id = doc_id)
             mask = MRI_Masks.objects.get(patient = patient, doctor = doc, structure = structure )
@@ -439,15 +441,18 @@ def Load_mask(request) :
                   }, status = status.HTTP_200_OK)
       except Patients.MultipleObjectsReturned: 
             return Response({
-                  "message" : "multiple rows were found patients"
+                  "message" : "multiple rows were found patients",
+                  "mask" : ""
                   }, status = status.HTTP_200_OK)
       except Doctors.MultipleObjectsReturned: 
             return Response({
-                  "message" : "multiple rows were found doctors"
+                  "message" : "multiple rows were found doctors",
+                  "mask" : ""
                   }, status = status.HTTP_200_OK)
       except Structures.MultipleObjectsReturned: 
             return Response({
-                  "message" : "multiple rows were found structures"
+                  "message" : "multiple rows were found structures",
+                  "mask" : ""
                   }, status = status.HTTP_200_OK)
       except MRI_Masks.MultipleObjectsReturned: 
             duplicates =  MRI_Masks.objects.filter(patient = patient, doctor = doc, structure = structure )
@@ -455,15 +460,18 @@ def Load_mask(request) :
             for p in duplicates:
                   print(f"Patient ID: {p.mask_id}, structure: {p.structure.structure_name}")
             return Response({
-                  "message" : "multiple rows were found"
+                  "message" : "multiple rows were found",
+                  "mask" : ""
                   }, status = status.HTTP_200_OK)
       except ObjectDoesNotExist : 
             return Response({
                   "message" : "Mask does not exist!",
+                  "mask" : ""
                   }, status = status.HTTP_200_OK)
       except Exception as e : 
             return Response({
                   "message" : f"some exception : {e}",
+                  "mask" : ""
                   }, status = status.HTTP_200_OK)
 
 # =============================================
@@ -477,6 +485,7 @@ def save_mask(request) :
       dims_raw = request.data.get('dims')
       dims = json.loads(dims_raw) if dims_raw else None
       doc_id = request.doc_id
+      modality = request.data.get('modality')
       if not mask:
         return Response(
             {"message": "No mask file provided."},
@@ -502,10 +511,16 @@ def save_mask(request) :
             {"message": "No dims provided."},
             status=status.HTTP_400_BAD_REQUEST
         )
+      elif not modality: 
+            return Response(
+            {"message": "No dims provided."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
             
       try :
             # check that the patient exists
-            p = Patients.objects.get(patient_id = patient_id)
+            p = Patients.objects.get(patient_id = patient_id, modality = modality)
 
             # check if the doc exists
             doc = Doctors.objects.get(id = doc_id)
@@ -697,70 +712,114 @@ def Update_mask(request) :
 #        Segmenting MRI 
 # =============================
 @api_view(['POST'])
-def SAM(request) : 
-    file_data = request.data["file"]
-    coords = request.data["coords"]
+def SAM(request):
+    start_total = time.perf_counter()  # measure total time
 
-    if not file_data or coords : 
-      return Response({
-            "message" : "Required Fields Missing!"
-            }, status = status.HTTP_400_BAD_REQUEST)
-    # read the coordinates 
-    try :
+    # ------------------------------
+    # 1️⃣  Get request data
+    # ------------------------------
+    t0 = time.perf_counter()
+    file_data = request.data.get("file")
+    coords = request.data.get("coords")
+    t1 = time.perf_counter()
+    print(f"[STEP 1] Read request data: {t1 - t0:.3f}s")
+
+    if not file_data or not coords:
+        return Response({"message": "Required Fields Missing!"}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ------------------------------
+    # 2️⃣  Parse coordinates
+    # ------------------------------
+    try:
+        t0 = time.perf_counter()
         x = coords.get('x')
         y = coords.get('y')
         z = coords.get('z')
-
-        coordinates = [[[int(x),int(y)]]]
-    except Exception as e: 
+        coordinates = [[[int(x), int(y)]]]
+        t1 = time.perf_counter()
+        print(f"[STEP 2] Parse coordinates: {t1 - t0:.3f}s")
+    except Exception as e:
         return Response({
-            "message" : "coordinates of wrong format", 
-            "error" : str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
+            "message": "coordinates of wrong format",
+            "error": str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
 
-    # prep the image to be segmented 
-    try : 
+    # ------------------------------
+    # 3️⃣  Decode image
+    # ------------------------------
+    try:
+        t0 = time.perf_counter()
         if file_data.startswith('data:image'):
-                file_data = file_data.split(',')[1]
+            file_data = file_data.split(',')[1]
         image_bytes = base64.b64decode(file_data)
         image = Image.open(BytesIO(image_bytes))
         if image.mode != 'RGB':
-                image = image.convert('RGB')
-    except Exception as e: 
-          return Response({
-            "message" : "Something went wrong when processing file",
-            "error" : str(e)
-            }, status=status.HTTP_400_BAD_REQUEST)
-    
-    # laoding the segment anything model 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = SamModel.from_pretrained("facebook/sam-vit-huge").to(device)
-    processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+            image = image.convert('RGB')
+        t1 = time.perf_counter()
+        print(f"[STEP 3] Decode image: {t1 - t0:.3f}s")
+    except Exception as e:
+        return Response({
+            "message": "Something went wrong when processing file",
+            "error": str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
 
+    # ------------------------------
+    # 4️⃣  Load model and processor
+    # ------------------------------
+    t0 = time.perf_counter()
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model = SamModel.from_pretrained("wanglab/MedSAM2").to(device)
+    processor = SamProcessor.from_pretrained("wanglab/MedSAM2")
+    t1 = time.perf_counter()
+    print(f"[STEP 4] Load SAM model: {t1 - t0:.3f}s")
+
+    # ------------------------------
+    # 5️⃣  Preprocess + inference
+    # ------------------------------
+    t0 = time.perf_counter()
     inputs = processor(image, input_points=coordinates, return_tensors="pt").to(device)
     with torch.no_grad():
-            outputs = model(**inputs)
-    
+        outputs = model(**inputs)
+    t1 = time.perf_counter()
+    print(f"[STEP 5] SAM inference: {t1 - t0:.3f}s")
+
+    # ------------------------------
+    # 6️⃣  Postprocess mask
+    # ------------------------------
+    t0 = time.perf_counter()
     masks = processor.image_processor.post_process_masks(
-            outputs.pred_masks.cpu(),
-            inputs["original_sizes"].cpu(),
-            inputs["reshaped_input_sizes"].cpu()
-        )
-        
-    # Get the first mask
+        outputs.pred_masks.cpu(),
+        inputs["original_sizes"].cpu(),
+        inputs["reshaped_input_sizes"].cpu()
+    )
     mask = masks[0][0][0].numpy()
     binary_mask = (mask > 0.5).astype(np.uint8) * 255
+    t1 = time.perf_counter()
+    print(f"[STEP 6] Postprocess masks: {t1 - t0:.3f}s")
 
+    # ------------------------------
+    # 7️⃣  Encode mask to base64
+    # ------------------------------
+    t0 = time.perf_counter()
     mask_image = Image.fromarray(binary_mask, mode='L')
-
     buffered = BytesIO()
     mask_image.save(buffered, format="PNG")
     mask_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    t1 = time.perf_counter()
+    print(f"[STEP 7] Encode mask: {t1 - t0:.3f}s")
+
+    # ------------------------------
+    # ✅ Total time
+    # ------------------------------
+    total_time = time.perf_counter() - start_total
+    print(f"=== TOTAL SAM FUNCTION TIME: {total_time:.3f}s ===")
+
     return Response({
-            "mask": f"data:image/png;base64,{mask_base64}",
-            "mask_shape": list(mask.shape),
-            "coords_used": coords
-        },status = status.HTTP_200_OK)
+        "mask": f"data:image/png;base64,{mask_base64}",
+        "mask_shape": list(mask.shape),
+        "coords_used": coords
+    }, status=status.HTTP_200_OK)
+
 
 
 

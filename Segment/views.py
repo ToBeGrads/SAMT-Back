@@ -604,6 +604,7 @@ def Update_mask(request) :
       patient_id = request.data.get("patient_id")
       structure_id = int(request.data.get('structure_id'))
       mask = request.FILES.get('file')
+      modality = request.data.get('modality')
       dims_raw = request.data.get('dims')
       dims = json.loads(dims_raw) if isinstance(dims_raw, str) else dims_raw
       dims = [int(d) for d in dims]
@@ -635,9 +636,14 @@ def Update_mask(request) :
             {"message": "No dims provided."},
             status=status.HTTP_400_BAD_REQUEST
         )
+      elif not modality:
+            return Response(
+            {"message": "No modality provided."},
+            status=status.HTTP_400_BAD_REQUEST
+        )
       try :
             # check that the patient exists
-            p = Patients.objects.get(patient_id = patient_id)
+            p = Patients.objects.get(patient_id = patient_id, modality = modality)
 
             # check if the doc is assiged to this patient 
             doc = Doctors.objects.get(id = doc_id)
@@ -670,7 +676,7 @@ def Update_mask(request) :
             # ======================
 
             if not mri_mask.mask_path : 
-                  mask.name = f"mask-{doc_id}-{patient_id}-{structure_id}.raw"
+                  mask.name = f"mask-{doc_id}-{patient_id}-{structure_id}-{modality}.raw"
             else : 
                   mask.name = os.path.basename(mri_mask.mask_path.name)
 

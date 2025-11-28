@@ -54,14 +54,15 @@ def Get_Structures(request):
 def myStructures(request) : 
       patient_id = request.data.get("patient_id")
       doc_id = request.doc_id
+      modality = request.data.get('modality')
 
-      if not patient_id : 
+      if not patient_id or not modality : 
             return Response({
             "message" : "Required Feilds missing!"
             }, status = status.HTTP_400_BAD_REQUEST)
       try : 
             # check if the doc and patient exist 
-            patient = Patients.objects.get(patient_id = patient_id)
+            patient = Patients.objects.get(patient_id = patient_id, modality = modality)
             doc = Doctors.objects.get(id = doc_id)
 
             # check if they re assigned
@@ -111,15 +112,16 @@ def AddStructure(request) :
       patient_id = request.data.get("patient_id")
       doc_id = request.doc_id
       structure = request.data.get("structure")
+      modality = request.data.get("modality")
       
-      if not structure or not patient_id : 
+      if not structure or not patient_id or not modality : 
             return Response({
                   "message" : "Required Fields missing !"
                   }, status = status.HTTP_200_OK)
 
       try : 
             # check if the doc and patient exist 
-            patient = Patients.objects.get(patient_id = patient_id)
+            patient = Patients.objects.get(patient_id = patient_id, modality = modality)
             doc = Doctors.objects.get(id = doc_id)
 
             # check if the doctor is assigned to the patient
@@ -150,7 +152,7 @@ def AddStructure(request) :
                                     }, status = status.HTTP_400_BAD_REQUEST)
             else : 
                   return Response({
-                        "message" : "Either the Patient is not assigned to this Docto, or the Structure does not exist!"
+                        "message" : "Either the Patient is not assigned to this Doctor, or the Structure does not exist!"
                         }, status = status.HTTP_400_BAD_REQUEST)
       except MRI_Masks.DoesNotExist :
             MRI_Masks.objects.get_or_create(doctor = doc, patient = patient, structure = structu, structure_color = structure["color"], coordinates = structure["coordinates"])     
@@ -325,6 +327,7 @@ def Update_Coordinates(request):
       patient_id = request.data.get("patient_id")
       structure_id = request.data.get("structure_id")
       doc_id = request.doc_id
+      modality = request.data.get('modality')
 
       if not coordinates or not patient_id or not structure_id : 
             return Response({
@@ -334,7 +337,7 @@ def Update_Coordinates(request):
       try:
             doc = Doctors.objects.get(id = doc_id) 
             structure = Structures.objects.get(structure_id = structure_id) 
-            patient = Patients.objects.get(patient_id = patient_id)
+            patient = Patients.objects.get(patient_id = patient_id, modality = modality)
             mask = MRI_Masks.objects.get(patient = patient, structure = structure, doctor = doc)
             
             # add the new coordinates 
@@ -373,6 +376,7 @@ def Has_segmentation(request) :
       patient_id = request.data.get("patient_id")
       structure_id = request.data.get("structure_id")
       doc_id = request.doc_id
+      modality = request.data.get('modality')
 
       if not coordinates or not patient_id or not structure_id : 
             return Response({
@@ -382,7 +386,7 @@ def Has_segmentation(request) :
             # check f everyone exist
             doc = Doctors.objects.get(id = doc_id) 
             structure = Structures.objects.get(structure_id = structure_id) 
-            patient = Patients.objects.get(patient_id = patient_id)
+            patient = Patients.objects.get(patient_id = patient_id, modality = modality)
             mask = MRI_Masks.objects.get(patient = patient, structure = structure, doctor = doc)
 
             coords = mask.coordinates
@@ -513,7 +517,7 @@ def save_mask(request) :
         )
       elif not modality: 
             return Response(
-            {"message": "No dims provided."},
+            {"message": "No modality provided."},
             status=status.HTTP_400_BAD_REQUEST
         )
 
@@ -611,6 +615,7 @@ def Update_mask(request) :
       doc_id = request.doc_id
 
       # check the request data availability
+      print(modality)
       if not mask:
         return Response(
             {"message": "No mask file provided."},

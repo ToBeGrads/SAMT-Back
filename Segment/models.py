@@ -14,7 +14,7 @@ class Patients(models.Model):
     mri = models.FileField(upload_to='MRIs/')
     dims = models.JSONField(default = list, null=True, blank=True)
     modality = models.CharField(max_length=255, null=True)
-    status = models.CharField(max_length=20, choices=[('Finished','F'),("Unfinished",'U')])
+    
 
     @property
     def age(self):
@@ -33,6 +33,7 @@ class MRI_Masks(models.Model):
     rater = models.IntegerField(null = True, blank = True)
     mask_path = models.FileField(upload_to = 'Masks/', null = True, blank = True)  # saved mask image or overlay
     dims = models.JSONField(default = list, null=True, blank=True)
+    last_modified = models.DateTimeField(auto_now=True)
     
 
 class MRI_MASK_Meta_Data(models.Model): 

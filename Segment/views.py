@@ -16,6 +16,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 import time
 import numpy as np
+from django.utils import timezone
 
 #===================================
 #       GET ALL THE STRUCTURES
@@ -63,6 +64,8 @@ def myStructures(request) :
       try : 
             # check if the doc and patient exist 
             patient = Patients.objects.get(patient_id = patient_id, modality = modality)
+            print("from my structures")
+            print(patient)
             doc = Doctors.objects.get(id = doc_id)
 
             # check if they re assigned
@@ -113,6 +116,7 @@ def AddStructure(request) :
       doc_id = request.doc_id
       structure = request.data.get("structure")
       modality = request.data.get("modality")
+      print(modality)
       
       if not structure or not patient_id or not modality : 
             return Response({
@@ -122,6 +126,8 @@ def AddStructure(request) :
       try : 
             # check if the doc and patient exist 
             patient = Patients.objects.get(patient_id = patient_id, modality = modality)
+            print("from add structure")
+            print(patient)
             doc = Doctors.objects.get(id = doc_id)
 
             # check if the doctor is assigned to the patient
@@ -135,6 +141,7 @@ def AddStructure(request) :
                   # if there is not structure created i.e. the structure is null for the doctor - patient pair
                   # this case is possible because the model for patient-doctors is not independent of Masks model
                   null_mask = masks.filter(structure__isnull=True).first()
+                  print("from adding structure, the null mask is :")
                   print(null_mask)
                   if null_mask : 
                         null_mask.structure = structu
@@ -199,9 +206,9 @@ def AddStructure(request) :
 @api_view(['GET'])
 def MRI_List_For_Segment(request):
       doc_id = request.doc_id 
-      print(doc_id)
-      print(Doctors.objects.get(id = doc_id))
-      print(Doctors.objects.filter(id=doc_id))
+      # print(doc_id)
+      # print(Doctors.objects.get(id = doc_id))
+      # print(Doctors.objects.filter(id=doc_id))
       # check if the doc exists 
       doc = Doctors.objects.filter(id = doc_id)
       if not doc.exists() : 
@@ -223,15 +230,17 @@ def MRI_List_For_Segment(request):
                               tup = (pid,m)
                               # if tup not in seen:
                               #       seen.add(tup)
+                              dt = p.last_modified
+                              formatted = f"{dt.year}-{dt.month}-{dt.day} {dt.strftime('%H:%M')}"
                               data.append({
                                           "patient_id": pid,
                                           "sex": p.patient.gender,
                                           "age": str(p.patient.age),
-                                          "status": p.patient.status,
+                                          "last_modified":  formatted,
                                           "mri_path": p.patient.mri.url,
                                           "modality" : p.patient.modality
                                     })
-                        print(data)
+                        # print(data)
                         return Response({
                               "message" : "fetching mris with success", 
                               "mris" : data
@@ -437,7 +446,8 @@ def Load_mask(request) :
                   "mask_path" : mask.mask_path.url, 
                   "mask_data" : mask_base64,
                   "mask_dims" : dims ,
-                  "mask_color" : mask.structure_color
+                  "mask_color" : mask.structure_color,
+                  "modality" : mask.patient.modality
                   }
             return Response({
                   "message" : "Mask loaded successfully!",
@@ -561,11 +571,12 @@ def save_mask(request) :
 
                   mask_content = mask.read()
                   renamed_mask = ContentFile(mask_content)
-                  new_name = f"mask-{doc_id}-{patient_id}-{structure_id}.raw"
+                  new_name = f"mask-{doc_id}-{patient_id}-{modality}-{structure_id}.raw"
                   renamed_mask.name = new_name
 
                   mri_mask.dims = dims
                   mri_mask.mask_path = renamed_mask 
+                  mri_mask.last_modified = timezone.now()
                   mri_mask.save()
 
 
@@ -615,7 +626,7 @@ def Update_mask(request) :
       doc_id = request.doc_id
 
       # check the request data availability
-      print(modality)
+      # print(modality)
       if not mask:
         return Response(
             {"message": "No mask file provided."},
@@ -689,10 +700,12 @@ def Update_mask(request) :
             old_path = mri_mask.mask_path.path
             # Delete the old file first to avoid duplicate errors
             if os.path.exists(old_path):
-                  print("Deleting the older version of the mask ...")
+                  # print("Deleting the older version of the mask ...")
                   os.remove(old_path)
                   
             mri_mask.mask_path.save(mask.name, mask, save=True)
+            mri_mask.last_modified = timezone.now()
+            mri_mask.save()
                   
             return Response({
                   "message": f"Mask {mri_mask.mask_path.url} updated with success!"

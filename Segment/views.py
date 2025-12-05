@@ -206,9 +206,6 @@ def AddStructure(request) :
 @api_view(['GET'])
 def MRI_List_For_Segment(request):
       doc_id = request.doc_id 
-      # print(doc_id)
-      # print(Doctors.objects.get(id = doc_id))
-      # print(Doctors.objects.filter(id=doc_id))
       # check if the doc exists 
       doc = Doctors.objects.filter(id = doc_id)
       if not doc.exists() : 
@@ -792,8 +789,8 @@ def SAM(request):
     # ------------------------------
     t0 = time.perf_counter()
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = SamModel.from_pretrained("wanglab/MedSAM2").to(device)
-    processor = SamProcessor.from_pretrained("wanglab/MedSAM2")
+    model = SamModel.from_pretrained("facebook/sam-vit-huge").to(device)
+    processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
     t1 = time.perf_counter()
     print(f"[STEP 4] Load SAM model: {t1 - t0:.3f}s")
 

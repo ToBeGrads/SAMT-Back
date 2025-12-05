@@ -26,7 +26,7 @@ class Patients(models.Model):
 class MRI_Masks(models.Model):
     mask_id = models.AutoField(primary_key = True)
     structure = models.ForeignKey(Structures, on_delete = models.CASCADE, null = True, blank = True)
-    structure_color = models.CharField(max_length=255)
+    structure_color = models.CharField(max_length=255, null=True, blank=True)
     coordinates = models.JSONField(default = list, null=True, blank=True)
     patient = models.ForeignKey(Patients, on_delete = models.CASCADE)
     doctor = models.ForeignKey(Doctors, on_delete = models.CASCADE, null = True, blank = True)

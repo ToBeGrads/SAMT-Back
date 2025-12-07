@@ -18,6 +18,24 @@ import time
 import numpy as np
 from django.utils import timezone
 
+
+print("🧠 Loading SAM model... (this may take a moment)")
+_start = time.perf_counter()
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"   Using device: {DEVICE}")
+
+try:
+    SAM_MODEL = SamModel.from_pretrained("facebook/sam-vit-huge").to(DEVICE)
+    
+    SAM_PROCESSOR = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+    SAM_MODEL.eval()  # Set to evaluation mode
+    print(f"✅ SAM model loaded in {time.perf_counter() - _start:.2f}s")
+except Exception as e:
+    print(f"❌ Failed to load SAM model: {e}")
+    SAM_MODEL = None
+    SAM_PROCESSOR = None
+
 #===================================
 #       GET ALL THE STRUCTURES
 #===================================
@@ -785,30 +803,28 @@ def SAM(request):
         }, status=status.HTTP_400_BAD_REQUEST)
 
     # ------------------------------
-    # 4️⃣  Load model and processor
+    # 4️⃣  Inference (MODEL ALREADY LOADED!)
     # ------------------------------
-    t0 = time.perf_counter()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = SamModel.from_pretrained("facebook/sam-vit-huge").to(device)
-    processor = SamProcessor.from_pretrained("facebook/sam-vit-huge")
-    t1 = time.perf_counter()
-    print(f"[STEP 4] Load SAM model: {t1 - t0:.3f}s")
+    try:
+        t0 = time.perf_counter()
+        inputs = SAM_PROCESSOR(image, input_points=coordinates, return_tensors="pt").to(DEVICE)
+        
+        with torch.no_grad():
+            outputs = SAM_MODEL(**inputs)
+        
+        t1 = time.perf_counter()
+        print(f"[STEP 4] SAM inference: {t1 - t0:.3f}s")
+    except Exception as e:
+        return Response({
+            "message": "Error during SAM inference",
+            "error": str(e)
+        }, status=status.HTTP_400_BAD_REQUEST)
 
     # ------------------------------
-    # 5️⃣  Preprocess + inference
+    # 5️⃣  Preprocess mask
     # ------------------------------
     t0 = time.perf_counter()
-    inputs = processor(image, input_points=coordinates, return_tensors="pt").to(device)
-    with torch.no_grad():
-        outputs = model(**inputs)
-    t1 = time.perf_counter()
-    print(f"[STEP 5] SAM inference: {t1 - t0:.3f}s")
-
-    # ------------------------------
-    # 6️⃣  Postprocess mask
-    # ------------------------------
-    t0 = time.perf_counter()
-    masks = processor.image_processor.post_process_masks(
+    masks = SAM_PROCESSOR.image_processor.post_process_masks(
         outputs.pred_masks.cpu(),
         inputs["original_sizes"].cpu(),
         inputs["reshaped_input_sizes"].cpu()
@@ -816,10 +832,10 @@ def SAM(request):
     mask = masks[0][0][0].numpy()
     binary_mask = (mask > 0.5).astype(np.uint8) * 255
     t1 = time.perf_counter()
-    print(f"[STEP 6] Postprocess masks: {t1 - t0:.3f}s")
+    print(f"[STEP 5] Postprocess masks: {t1 - t0:.3f}s")
 
     # ------------------------------
-    # 7️⃣  Encode mask to base64
+    # 6️⃣  Encode mask to base64
     # ------------------------------
     t0 = time.perf_counter()
     mask_image = Image.fromarray(binary_mask, mode='L')
@@ -827,14 +843,14 @@ def SAM(request):
     mask_image.save(buffered, format="PNG")
     mask_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
     t1 = time.perf_counter()
-    print(f"[STEP 7] Encode mask: {t1 - t0:.3f}s")
+    print(f"[STEP 6] Encode mask: {t1 - t0:.3f}s")
 
     # ------------------------------
     # ✅ Total time
     # ------------------------------
     total_time = time.perf_counter() - start_total
     print(f"=== TOTAL SAM FUNCTION TIME: {total_time:.3f}s ===")
-
+    
     return Response({
         "mask": f"data:image/png;base64,{mask_base64}",
         "mask_shape": list(mask.shape),

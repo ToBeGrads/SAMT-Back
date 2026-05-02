@@ -1,40 +1,93 @@
 import base64
+from collections import defaultdict
 from io import BytesIO
 import json
+import re
+import pydicom 
+from pydicom.errors import InvalidDicomError
+import nibabel as nib
 import os
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.decorators import api_view
 from PIL import Image
-from django.views.decorators.http import require_GET
 import torch
 from transformers import SamModel, SamProcessor
+from django.core.files.storage import FileSystemStorage
 import numpy as np
-from .models import Patients, MRI_Masks, Structures
+
+from backend import settings
+from .models import MRI_Masks
 from Auth.models import Doctors
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 import time
 import numpy as np
 from django.utils import timezone
+from .models import Structures, Patients
+import shutil
+
+#========================================
+#           UTILITIES
+#========================================
+from django.utils import timezone
+from datetime import timedelta
+
+def time_ago(dt):
+      """Return human-readable time difference (e.g., '5 minutes ago')"""
+      now = timezone.now()
+      diff = now - dt
+
+      if diff < timedelta(seconds=60):
+            return "just now"
+      elif diff < timedelta(minutes=60):
+            minutes = int(diff.total_seconds() // 60)
+            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+      elif diff < timedelta(hours=24):
+            hours = int(diff.total_seconds() // 3600)
+            return f"{hours} hour{'s' if hours != 1 else ''} ago"
+      elif diff < timedelta(days=30):
+            days = int(diff.total_seconds() // 86400)
+            return f"{days} day{'s' if days != 1 else ''} ago"
+      elif diff < timedelta(days=365):
+            months = int(diff.days // 30)
+            return f"{months} month{'s' if months != 1 else ''} ago"
+      else:
+            years = int(diff.days // 365)
+            return f"{years} year{'s' if years != 1 else ''} ago"
+      
 
 
-print("🧠 Loading SAM model... (this may take a moment)")
-_start = time.perf_counter()
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"   Using device: {DEVICE}")
-
-try:
-    SAM_MODEL = SamModel.from_pretrained("facebook/sam-vit-huge").to(DEVICE)
+def get_max_patient_id():
+    # Fetch all existing IDs
+    ids = Patients.objects.values_list('patient_id', flat=True)
     
-    SAM_PROCESSOR = SamProcessor.from_pretrained("facebook/sam-vit-huge")
-    SAM_MODEL.eval()  # Set to evaluation mode
-    print(f"✅ SAM model loaded in {time.perf_counter() - _start:.2f}s")
-except Exception as e:
-    print(f"❌ Failed to load SAM model: {e}")
-    SAM_MODEL = None
-    SAM_PROCESSOR = None
+    # Extract numeric parts (e.g., "P001" -> 1, "PAT10" -> 10)
+    numbers = [int(re.search(r'\d+', pid).group()) for pid in ids if re.search(r'\d+', pid)]
+    
+    # Return largest number (0 if empty)
+    return max(numbers) if numbers else 0
+
+#===================================================
+#                  LOADING SAM
+#===================================================
+# _start = time.perf_counter()
+# DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# print(f"   Using device: {DEVICE}")
+# try:
+#     SAM_MODEL = SamModel.from_pretrained("facebook/sam-vit-huge").to(DEVICE)
+    
+#     SAM_PROCESSOR = SamProcessor.from_pretrained("facebook/sam-vit-huge")
+#     SAM_MODEL.eval()  # Set to evaluation mode
+#     print(f"SAM model loaded in {time.perf_counter() - _start:.2f}s")
+# except Exception as e:
+#     print(f"Failed to load SAM model: {e}")
+#     SAM_MODEL = None
+#     SAM_PROCESSOR = None
+
+# =====================================================
+#  Fetch Patients meta data The Annotator assigned to
+# =====================================================
 
 #===================================
 #       GET ALL THE STRUCTURES
@@ -66,6 +119,183 @@ def Get_Structures(request):
                   "message" : f"An error occured{e}", 
                   "structures" : ""
                   }, status = status.HTTP_400_BAD_REQUEST)
+      
+
+#=====================================================
+#                   Uploading MRIs
+#=====================================================
+@api_view(['POST'])
+def UploadMRIs(request) : 
+      doc_id = request.doc_id
+      patient_id = request.data.get("patient_id")
+      mode = request.data.get("Mode")
+      files = request.FILES.getlist('mriFiles')
+      results = defaultdict()
+      fs = FileSystemStorage()
+
+      
+      print("Received files :", files)
+      
+      for f in files:
+            rel_path = None
+            new_path = None
+            try:
+                  file_name = f.name
+                  max_num = get_max_patient_id()
+                  new_pid = "PID_" + str(max_num+1)
+                  clean_name = "FID_" + str(max_num + 1) + "_" + file_name
+                  print("Processing File",file_name)
+                  rel_path = fs.save(clean_name, f)
+                  abs_path = str(os.path.normpath(fs.path(rel_path)))
+
+                  if os.path.getsize(abs_path) == 0:
+                        results[file_name] = "Unsupported format or empty file"
+                        if rel_path and fs.exists(rel_path):
+                              fs.delete(rel_path)
+                        continue
+
+                  gender, birth_year, modality = None, None, 'Unknown'
+
+                  if clean_name.endswith('.dcm'):
+                        try:
+                              ds = pydicom.dcmread(abs_path, force=True)
+                              if not ds.get('SOPClassUID'):
+                                    results[file_name] = "Corrupt"
+                                    if rel_path and fs.exists(rel_path):
+                                          fs.delete(rel_path)
+                                    continue
+                    
+                              gender = str(ds.get('PatientSex', ''))
+                              dob = str(ds.get('PatientBirthDate', ''))
+                              birth_year = int(dob[:4]) if len(dob) >= 4 else None
+                              modality = 'DICOM'
+                        except (InvalidDicomError, EOFError, UnicodeDecodeError) as e:
+                              results[file_name] = "Corrupt"
+                              if rel_path and fs.exists(rel_path):
+                                    fs.delete(rel_path)
+                              continue
+
+                  # --- NIfTI ---
+                  elif clean_name.endswith(('.nii', '.nii.gz')):
+                        try:
+                              img = nib.load(abs_path) 
+                              img.get_fdata()
+                              modality = 'NIfTI'
+                              img.uncache()
+                              del img
+                        except (nib.filebasedimages.ImageFileError, OSError, ValueError) as e:
+                              results[file_name] = "Corrupt"
+                              if rel_path and fs.exists(rel_path):
+                                    fs.delete(rel_path)
+                              continue
+                  else:
+                        results[file_name] = "Unsupported format"
+                        if rel_path and fs.exists(rel_path):
+                              fs.delete(rel_path)
+                        continue
+
+                  # --- Save to DB ---
+                  try : 
+                        # check that the file is not already uploaded
+                        p = Patients.objects.filter(mri__icontains = file_name)
+                        
+                        if p.exists(): 
+                              print("File already exist", file_name)
+                              results[file_name] = "Already exists"
+                              fs.delete(new_path)
+
+                        else :
+                              Patient_ID = None
+                              tag = None
+
+                              if mode == "New" : 
+                                    Patient_ID = new_pid
+                                    tag = "External"
+                              elif mode == "Update" : 
+                                    Patient_ID = patient_id
+                                    tag = "Updated"
+                              else : 
+                                    return Response({
+                                    "message" : "Can not Upload file!", 
+                                    }, status= status.HTTP_400_BAD_REQUEST)
+
+                              # create new dir for the new patient
+                              target_dir = os.path.join(settings.MEDIA_ROOT, "MRIs", Patient_ID)
+                              os.makedirs(target_dir, exist_ok=True)
+
+                              absolute_path = fs.path(rel_path)
+                              fname = os.path.basename(rel_path)
+
+                              new_path = os.path.join(target_dir, fname)
+
+                              shutil.move(absolute_path, new_path)
+
+                              # convert to path relative to MEDIA_ROOT
+                              relative_path = os.path.relpath(new_path, settings.MEDIA_ROOT)
+                              
+                              patient = Patients.objects.create(
+                                    patient_id = Patient_ID,
+                                    gender=gender or 'Unknown',
+                                    birth_year=birth_year,
+                                    mri=relative_path,
+                                    modality=modality, 
+                                    tag= tag
+                                    )
+                              patient.save()
+                              results[file_name] = "Saved"
+
+                              # remove the duplicated files
+                              if rel_path and fs.exists(rel_path):
+                                    fs.delete(rel_path)
+                              print(f"Patient saved successfully: {file_name}")
+
+                              # now create a mask for the uploaded MRI
+                              mri_mask = MRI_Masks.objects.create(
+                                    patient = patient
+                                    )
+                              mri_mask.save()
+                              print(f"Successfully created mask for the patient: {file_name}")
+
+                              # after the patient is saved, we assign it to the current doctor
+                              try:
+                                    doctor = Doctors.objects.get(id=doc_id)
+                              except Doctors.DoesNotExist:
+                                    return Response({
+                                          "message" : f"No doctor found with email {doctor.email}", 
+                                    }, status= status.HTTP_400_BAD_REQUEST)
+
+                              try:
+                                    patients = Patients.objects.filter(patient_id = Patient_ID)
+                                    for m in patients :
+                                          masks = MRI_Masks.objects.filter(patient=m)
+                                          for p in masks : 
+                                                p.doctor = doctor
+                                                p.save()
+                              except Exception as e :
+                                    return Response({
+                                          "message" : f"Something went wrong when assiging doctor",
+                                          "Error" : f"{e}" 
+                                    }, status= status.HTTP_400_BAD_REQUEST) 
+                                    
+
+                  except Exception as e : 
+                        if rel_path and fs.exists(rel_path):
+                              fs.delete(rel_path)
+                        continue
+            except Exception as e:
+                  if rel_path and fs.exists(rel_path):
+                        fs.delete(rel_path)
+                  return Response({
+                        "message" : "An error occurred while uploading file!", 
+                        "data" : results,
+                        "Error" : f"{e}"
+                  }, status= status.HTTP_400_BAD_REQUEST)
+      return Response({
+            "message" : "Files Uploaded correctly!", 
+            'data' : results
+            }, status= status.HTTP_200_OK)
+
+
 # =====================================================
 #   Retreive the structures created by the Annotator
 # =====================================================           
@@ -76,6 +306,7 @@ def myStructures(request) :
       modality = request.data.get('modality')
 
       if not patient_id or not modality : 
+            print(request.data)
             return Response({
             "message" : "Required Feilds missing!"
             }, status = status.HTTP_400_BAD_REQUEST)
@@ -124,6 +355,7 @@ def myStructures(request) :
              return Response({
                   "message" : f"uh i guess smthn went wrong : {e}", 
                   }, status = status.HTTP_200_OK)
+      
 
 # ======================= 
 #   Add New Structure
@@ -201,26 +433,8 @@ def AddStructure(request) :
                   "message" : f"Exception : {e}", 
                   }, status = status.HTTP_200_OK)
 
-# =============================================
-# Fetching the masks of each mri to be rated 
-# =============================================
-# def receive_selected_structures(request): 
-#       patient_id = request.data.get("patient_id")
 
-#       # check the patient exists 
-#       pt = Patients.objects.get(patient_id = patient_id).DoesNotExist
-#       if pt : 
-#             return Response({
-#                   "message" : "Invalid patient ID"
-#                   }, status = status.HTTP_200_OK)
-      
-#       # if the patient exists, then we fetch all of its mri masks 
-#       else : 
-#             masks = MRI_Masks.objects.get(patient = patient_id)
 
-# =====================================================
-#  Fetch Patients meta data The Annotator assigned to
-# =====================================================
 @api_view(['GET'])
 def MRI_List_For_Segment(request):
       doc_id = request.doc_id 
@@ -237,25 +451,35 @@ def MRI_List_For_Segment(request):
                   # return the mris 
                   mris = MRI_Masks.objects.filter(doctor=doc_id).select_related('patient')
                   if mris.exists():
-                        seen = set()
                         data = []
-                        for p in mris:
-                              pid = p.patient.patient_id
-                              m = p.patient.modality
-                              tup = (pid,m)
-                              # if tup not in seen:
-                              #       seen.add(tup)
+                        data_dict = defaultdict(lambda: {
+                              "patient_id": None,
+                              "sex": None,
+                              "age": None,
+                              "last_modified": None,
+                              "mri_path": [],
+                              "modality": [], 
+                              "tag" : None
+                        })
+                        for p in mris:  
                               dt = p.last_modified
-                              formatted = f"{dt.year}-{dt.month}-{dt.day} {dt.strftime('%H:%M')}"
-                              data.append({
-                                          "patient_id": pid,
+                              formatted = time_ago(dt)
+                              patient_id = p.patient.patient_id
+                              # Initialize patient entry if not already present
+                              if data_dict[patient_id]["patient_id"] is None:
+                                    data_dict[patient_id].update({
+                                          "patient_id": patient_id,
                                           "sex": p.patient.gender,
                                           "age": str(p.patient.age),
-                                          "last_modified":  formatted,
-                                          "mri_path": p.patient.mri.url,
-                                          "modality" : p.patient.modality
-                                    })
-                        # print(data)
+                                          "last_modified": formatted,
+                                          "tag" : p.patient.tag if p.patient.tag else "Local"
+                                          })
+                              data_dict[patient_id]["mri_path"].append(p.patient.mri.url)
+                              print("Appending modality ", p.patient.modality)
+                              data_dict[patient_id]["modality"].append(p.patient.modality)
+
+                        data = list(data_dict.values())
+
                         return Response({
                               "message" : "fetching mris with success", 
                               "mris" : data
@@ -432,6 +656,7 @@ def Has_segmentation(request) :
             return Response({
                   "message" : f"Exception : {e}"
                   }, status = status.HTTP_400_BAD_REQUEST)
+      
 # =============================================
 #              Load the mask 
 # =============================================
@@ -503,6 +728,7 @@ def Load_mask(request) :
                   "mask" : ""
                   }, status = status.HTTP_200_OK)
 
+
 # =============================================
 #              Create the mask 
 # =============================================
@@ -545,7 +771,6 @@ def save_mask(request) :
             {"message": "No modality provided."},
             status=status.HTTP_400_BAD_REQUEST
         )
-
             
       try :
             # check that the patient exists
@@ -625,6 +850,7 @@ def save_mask(request) :
                   "message" : f"some exception :{e}", 
                   "mask_id" : ""
                   }, status = status.HTTP_200_OK)
+   
       
 # =============================================
 #              Updating the mask 
@@ -856,7 +1082,3 @@ def SAM(request):
         "mask_shape": list(mask.shape),
         "coords_used": coords
     }, status=status.HTTP_200_OK)
-
-
-
-

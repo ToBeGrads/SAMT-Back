@@ -11,5 +11,6 @@ urlpatterns = [
     path("Addstructure", views.AddStructure),
     path("UpdateCoordinates", views.Update_Coordinates),
     path('AddCoordinates', views.Add_Coordinates), 
-    path("Load_mask", views.Load_mask)
+    path("Load_mask", views.Load_mask), 
+    path("UploadMris", views.UploadMRIs)
 ]

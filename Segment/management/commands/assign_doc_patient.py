@@ -20,7 +20,7 @@ class Command(BaseCommand):
             return
 
         try:
-            patients = Patients.objects.filter(patient_id =  "PID_003")
+            patients = Patients.objects.filter(patient_id = patient_id)
             for m in patients :
                 masks = MRI_Masks.objects.filter(patient=m)
                 for p in masks : 

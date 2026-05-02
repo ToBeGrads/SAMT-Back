@@ -16,7 +16,7 @@ class Command(BaseCommand):
 
             # Find patient in DB (if exists)
             try:
-                patient_t1 = Patients.objects.get(patient_id=patient_folder,modality = "T1")
+                # patient_t1 = Patients.objects.get(patient_id=patient_folder,modality = "T1")
                 patient_t2 = Patients.objects.get(patient_id=patient_folder,modality = "T2")
 
             except Patients.DoesNotExist:
@@ -26,12 +26,12 @@ class Command(BaseCommand):
             for file_name in os.listdir(patient_path):
                 if file_name.endswith(('.nii', '.nii.gz', '.dcm', '.png', '.jpg')):
                     full_path = os.path.join(patient_path, file_name)
-                    if "T1" in file_name:
-                        patient_t1.mri = f"MRIs/{patient_folder}/{file_name}"
-                        patient_t1.save()
-                        MRI_Masks.objects.get_or_create(
-                        patient=patient_t1)
-                    elif "T2" in file_name : 
+                    # if "T1" in file_name:
+                    #     patient_t1.mri = f"MRIs/{patient_folder}/{file_name}"
+                    #     patient_t1.save()
+                    #     MRI_Masks.objects.get_or_create(
+                    #     patient=patient_t1)
+                    if "T2" in file_name : 
                         patient_t2.mri = f"MRIs/{patient_folder}/{file_name}"
                         patient_t2.save()
                         MRI_Masks.objects.get_or_create(
